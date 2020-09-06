@@ -5,5 +5,7 @@ panic = 'unwind'
 members = [
     'node',
     'pallets/template',
+    'pallets/uniswap-exchanges',
+    'pallets/fungible-assets',
     'runtime',
 ]

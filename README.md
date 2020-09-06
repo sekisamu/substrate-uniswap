@@ -1,6 +1,6 @@
-# Substrate Node Template
+# Substrate Uniswap Exchanges
 
-A new FRAME-based Substrate node, ready for hacking :rocket:
+A basic implementation of uniswap V1
 
 ## Local Development
 

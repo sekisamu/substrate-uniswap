@@ -9,8 +9,9 @@ include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 use sp_std::prelude::*;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 use sp_runtime::{
-	ApplyExtrinsicResult, generic, create_runtime_str, impl_opaque_keys, MultiSignature,
+	ApplyExtrinsicResult, generic, create_runtime_str, impl_opaque_keys, MultiSignature, ModuleId,
 	transaction_validity::{TransactionValidity, TransactionSource},
+	traits::Convert,
 };
 use sp_runtime::traits::{
 	BlakeTwo256, Block as BlockT, IdentityLookup, Verify, IdentifyAccount, NumberFor, Saturating,
@@ -262,6 +263,30 @@ impl template::Trait for Runtime {
 	type Event = Event;
 }
 
+impl fungible_assets::Trait for Runtime {
+	type Event = Event;
+	type Balance = u128;
+	type AssetId = u64;
+}
+parameter_types! {
+	pub const ExchangeModuleId: ModuleId = ModuleId(*b"exchange");
+}
+
+pub struct BalanceHandler;
+impl Convert<Balance, u128> for BalanceHandler {
+	fn convert(a: Balance) -> u128 {
+		a
+	}
+}
+impl uniswap_exchanges::Trait for Runtime {
+	type Currency = Balances;
+	type ModuleId = ExchangeModuleId;
+	type Event = Event;
+	type ExchangeId = u64;
+	type FungibleToken = FungibleAssets;
+	type Handler = BalanceHandler;
+}
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
 	pub enum Runtime where
@@ -279,6 +304,8 @@ construct_runtime!(
 		Sudo: pallet_sudo::{Module, Call, Config<T>, Storage, Event<T>},
 		// Include the custom logic from the template pallet in the runtime.
 		TemplateModule: template::{Module, Call, Storage, Event<T>},
+		FungibleAssets: fungible_assets::{Module, Call, Storage, Event<T>},
+		UniswapExchanges: uniswap_exchanges::{Module, Call, Storage, Event<T>},
 	}
 );
 
