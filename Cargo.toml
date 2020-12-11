@@ -7,5 +7,7 @@ members = [
     'pallets/template',
     'pallets/uniswap-exchanges',
     'pallets/fungible-assets',
+    'pallets/parachain-info',
+    'pallets/token-dealer',
     'runtime',
 ]

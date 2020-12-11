@@ -8,15 +8,15 @@ edition = "2018"
 
 [dependencies]
 codec = { package = "parity-scale-codec", version = "1.3.1", default-features = false, features = ["derive"] }
-sp-application-crypto = { version = "2.0.0-rc6", default-features = false, git = "https://github.com/paritytech/substrate.git", tag = "v2.0.0-rc6" }
-sp-std = { version = "2.0.0-rc6", default-features = false, git = "https://github.com/paritytech/substrate.git", tag = "v2.0.0-rc6" }
-sp-io = { version = "2.0.0-rc6", default-features = false, git = "https://github.com/paritytech/substrate.git", tag = "v2.0.0-rc6" }
-sp-runtime = { version = "2.0.0-rc6", default-features = false, git = "https://github.com/paritytech/substrate.git", tag = "v2.0.0-rc6" }
-sp-core = { version = "2.0.0-rc6", default-features = false, git = "https://github.com/paritytech/substrate.git", tag = "v2.0.0-rc6" }
-frame-support = { version = "2.0.0-rc6", default-features = false, git = "https://github.com/paritytech/substrate.git", tag = "v2.0.0-rc6" }
-frame-system = { version = "2.0.0-rc6", default-features = false, git = "https://github.com/paritytech/substrate.git", tag = "v2.0.0-rc6" }
+sp-application-crypto = {  branch = "rococo-branch", default-features = false, git = "https://github.com/paritytech/substrate.git" }
+sp-std = {  branch = "rococo-branch", default-features = false, git = "https://github.com/paritytech/substrate.git" }
+sp-io = {  branch = "rococo-branch", default-features = false, git = "https://github.com/paritytech/substrate.git" }
+sp-runtime = {  branch = "rococo-branch", default-features = false, git = "https://github.com/paritytech/substrate.git" }
+sp-core = {  branch = "rococo-branch", default-features = false, git = "https://github.com/paritytech/substrate.git" }
+frame-support = {  branch = "rococo-branch", default-features = false, git = "https://github.com/paritytech/substrate.git" }
+frame-system = {  branch = "rococo-branch", default-features = false, git = "https://github.com/paritytech/substrate.git" }
 # custom
-pallet-fungible-assets = { version = "2.0.0-rc6", default-features = false, path = "../fungible-assets" }
+pallet-fungible-assets = { default-features = false, path = "../fungible-assets" }
 
 [features]
 default = ["std"]
