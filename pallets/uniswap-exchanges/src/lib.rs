@@ -1,6 +1,8 @@
 
 //! This Module serves as a combination of uniswap factory
 //! and exchange
+//!
+//! Now only support add CustomToken-NativeToken pair.
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::{Decode, Encode};
@@ -24,6 +26,12 @@ use frame_support::{
 use frame_system::ensure_signed;
 use pallet_fungible_assets::{TokenDossier, Fungible, IssueAndBurn};
 
+type TokenDossierOf<T> = TokenDossier<<T as pallet_fungible_assets::Trait>::ExchangeId>;
+pub type CurrencyOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
+pub type BalanceOf<T> = <<T as Trait>::FungibleToken as Fungible<
+	<T as pallet_fungible_assets::Trait>::AssetId,
+	<T as frame_system::Trait>::AccountId,
+	<T as pallet_fungible_assets::Trait>::ExchangeId>>::Balance;
 
 #[derive(Encode, Decode)]
 pub struct Exchange<AssetId, Balance, CurrencyOf> {
@@ -46,24 +54,23 @@ impl<A, B: Zero, C: Zero> Exchange<A, B, C> {
 	}
 }
 
-pub type CurrencyOf<T> = <<T as Trait>::Currency as Currency<<T as frame_system::Trait>::AccountId>>::Balance;
 
 pub trait Trait: frame_system::Trait + pallet_fungible_assets::Trait {
 	type Currency: Currency<Self::AccountId>;
 	type ModuleId: Get<ModuleId>;
 	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
-	type ExchangeId: Parameter + Member + AtLeast32Bit + Default + Copy;
-	type FungibleToken: IssueAndBurn<Self::AssetId, Self::AccountId, Balance = Self::Balance>;
+	// type ExchangeId: Parameter + Member + AtLeast32Bit + Default + Copy;
+	type FungibleToken: IssueAndBurn<Self::AssetId, Self::AccountId, Self::ExchangeId>;
 	/// help to convert native token balance to fungible token balance
-	type Handler: Convert<CurrencyOf<Self>, Self::Balance>;
+	type Handler: Convert<CurrencyOf<Self>, BalanceOf<Self>>;
 }
 
 decl_event! {
 	pub enum Event<T> where
 		CurrencyOf = CurrencyOf<T>,
 		<T as frame_system::Trait>::AccountId,
-		<T as pallet_fungible_assets::Trait>::Balance,
-		<T as Trait>::ExchangeId,
+		Balance = BalanceOf<T>,
+		<T as pallet_fungible_assets::Trait>::ExchangeId,
 		<T as pallet_fungible_assets::Trait>::AssetId,
 
 	{
@@ -97,7 +104,7 @@ decl_error! {
 decl_storage! {
 	trait Store for Module<T: Trait> as UniswapExchanges {
 
-		pub Exchanges get(fn exchanges): map hasher(twox_64_concat) T::ExchangeId => Option<Exchange<T::AssetId, T::Balance, CurrencyOf<T>>>;
+		pub Exchanges get(fn exchanges): map hasher(twox_64_concat) T::ExchangeId => Option<Exchange<T::AssetId, BalanceOf<T>, CurrencyOf<T>>>;
 
 		pub TradeTokenToExchange get(fn tt_to_exchange): map hasher(twox_64_concat) T::AssetId => Option<T::ExchangeId>;
 
@@ -114,23 +121,25 @@ decl_module! {
 		fn deposit_event() = default;
 
 		#[weight = 0]
-		fn create_exchange(origin, token_id: T::AssetId) {
+		fn create_exchange(origin, token_type: TokenDossierOf<T>) {
 			// make sure there will be only one exchange for a specific trade token
 			// and this trade token exists
-			ensure!(Self::tt_to_exchange(&token_id).is_none() &&
-				T::FungibleToken::exists(&token_id), Error::<T>::ExchangeExists);
+			ensure!(T::FungibleToken::exists(&token_type), Error::<T>::TradeTokenNotExists);
+
+			let ttoken_id = T::FungibleToken::token_dossier(&token_type).unwrap();
+			ensure!(Self::tt_to_exchange(&ttoken_id).is_none(), Error::<T>::ExchangeExists);
 
 			// new allocated exchange id, and craete a new lp token for it
 			let exchange_id = Self::next_exchange_id();
 			let lp_asset_id = Self::create_lp_token(exchange_id);
 
-			let exchange_info = Exchange::new(lp_asset_id, token_id);
+			let exchange_info = Exchange::new(lp_asset_id, ttoken_id);
 			// add new exchange info
 			<Exchanges<T>>::insert(&exchange_id, exchange_info);
-			<TradeTokenToExchange<T>>::insert(&token_id, exchange_id);
+			<TradeTokenToExchange<T>>::insert(&ttoken_id, exchange_id);
 			<LPTokenToExchange<T>>::insert(&lp_asset_id, exchange_id);
 
-			Self::deposit_event(RawEvent::NewExchange(exchange_id, lp_asset_id, token_id));
+			Self::deposit_event(RawEvent::NewExchange(exchange_id, lp_asset_id, ttoken_id));
 		}
 
 
@@ -141,8 +150,8 @@ decl_module! {
 			origin,
 			exchange_id: T::ExchangeId,
 			native_token_transferred: CurrencyOf<T>,
-			min_liquidity: T::Balance,
-			max_trade_tokens: T::Balance,
+			min_liquidity: BalanceOf<T>,
+			max_trade_tokens: BalanceOf<T>,
 			deadline: T::BlockNumber
 		) {
 
@@ -153,7 +162,7 @@ decl_module! {
 			ensure!(deadline > <frame_system::Module<T>>::block_number(), Error::<T>::TooLate);
 			// make sure that the exchange has been created
 			ensure!(Self::exchanges(&exchange_id).is_some() &&
-				T::FungibleToken::exists(&trade_token_id), Error::<T>::TradeTokenNotExists);
+				!T::FungibleToken::total_supply(&trade_token_id).is_zero(), Error::<T>::TradeTokenNotExists);
 
 			// current total liquidity, refer to l_0 in spec
 			let lp_total_supply = T::FungibleToken::total_supply(&lp_token_id);
@@ -203,9 +212,9 @@ decl_module! {
 		fn remove_liquidity(
 			origin,
 			exchange_id: T::ExchangeId,
-			liquidity_burned: T::Balance,
+			liquidity_burned: BalanceOf<T>,
 			min_native_tokens: CurrencyOf<T>,
-			min_trade_tokens: T::Balance,
+			min_trade_tokens: BalanceOf<T>,
 			deadline: T::BlockNumber
 		) {
 			let who = ensure_signed(origin)?;
@@ -215,7 +224,7 @@ decl_module! {
 
 	        ensure!(deadline > <frame_system::Module<T>>::block_number(), Error::<T>::TooLate);
 			ensure!(Self::exchanges(&exchange_id).is_some() &&
-				T::FungibleToken::exists(&trade_token_id), Error::<T>::TradeTokenNotExists);
+				!T::FungibleToken::total_supply(&trade_token_id).is_zero(), Error::<T>::TradeTokenNotExists);
 			ensure!(liquidity_burned > Zero::zero() && min_native_tokens > Zero::zero() &&
 				min_trade_tokens > Zero::zero(), Error::<T>::NotQualifiedBurn);
 
@@ -255,7 +264,7 @@ decl_module! {
 			origin,
 			exchange_id: T::ExchangeId,
 			native_sold: CurrencyOf<T>,
-			min_trade_tokens: T::Balance,
+			min_trade_tokens: BalanceOf<T>,
 			deadline: T::BlockNumber,
 			recipient: T::AccountId
 		) {
@@ -268,7 +277,7 @@ decl_module! {
 		fn trade_to_native_token_input(
 			origin,
 			exchange_id: T::ExchangeId,
-			trade_token_sold: T::Balance,
+			trade_token_sold: BalanceOf<T>,
 			min_native_tokens: CurrencyOf<T>,
 			deadline: T::BlockNumber,
 			recipient: T::AccountId
@@ -282,7 +291,7 @@ decl_module! {
 		fn native_to_trade_token_output(
 			origin,
 			exchange_id: T::ExchangeId,
-			trade_token_bought: T::Balance,
+			trade_token_bought: BalanceOf<T>,
 			deadline: T::BlockNumber,
 			recipient: T::AccountId
 		) {
@@ -317,15 +326,15 @@ impl<T: Trait> Module<T> {
 
 	fn create_lp_token(exchange_id: T::ExchangeId) -> T::AssetId {
 		// create a new lp token for exchange
-		T::FungibleToken::create_new_asset(TokenDossier::new_lp_token())
+		T::FungibleToken::create_new_asset(&<TokenDossierOf<T>>::new_lp_token(exchange_id))
 	}
 
 	fn input_liquidity(
 		who: &T::AccountId,
 		native_token_amount: CurrencyOf<T>,
 		trade_token_id: &T::AssetId,
-		trade_token_amount: T::Balance,
-		exchange: &mut Exchange<T::AssetId, T::Balance, CurrencyOf<T>>
+		trade_token_amount: BalanceOf<T>,
+		exchange: &mut Exchange<T::AssetId, BalanceOf<T>, CurrencyOf<T>>
 	) -> DispatchResult {
 		let this = Self::account_id();
 		T::Currency::transfer(who, &this, native_token_amount, ExistenceRequirement::KeepAlive)?;
@@ -340,8 +349,8 @@ impl<T: Trait> Module<T> {
 		who: &T::AccountId,
 		native_token_amount: CurrencyOf<T>,
 		trade_token_id: &T::AssetId,
-		trade_token_amount: T::Balance,
-		exchange: &mut Exchange<T::AssetId, T::Balance, CurrencyOf<T>>
+		trade_token_amount: BalanceOf<T>,
+		exchange: &mut Exchange<T::AssetId, BalanceOf<T>, CurrencyOf<T>>
 	) -> DispatchResult {
 		let this = Self::account_id();
 		T::Currency::transfer(&this, who, native_token_amount, ExistenceRequirement::KeepAlive)?;
@@ -355,10 +364,10 @@ impl<T: Trait> Module<T> {
 	/// change the storage
 	/// put this at the end of the `native_to_trade_input` function
 	fn native_to_trade_swap(
-		exchange: &mut Exchange<T::AssetId, T::Balance, CurrencyOf<T>>,
+		exchange: &mut Exchange<T::AssetId, BalanceOf<T>, CurrencyOf<T>>,
 		native_in: CurrencyOf<T>,
 		trade_token_id: &T::AssetId,
-		trade_out: T::Balance,
+		trade_out: BalanceOf<T>,
 		buyer: &T::AccountId,
 		recipient: &T::AccountId
 	) -> DispatchResult {
@@ -374,8 +383,8 @@ impl<T: Trait> Module<T> {
 
 	/// change the storage
 	fn trade_to_native_swap(
-		exchange: &mut Exchange<T::AssetId, T::Balance, CurrencyOf<T>>,
-		trade_in: T::Balance,
+		exchange: &mut Exchange<T::AssetId, BalanceOf<T>, CurrencyOf<T>>,
+		trade_in: BalanceOf<T>,
 		trade_token_id: &T::AssetId,
 		native_out: CurrencyOf<T>,
 		buyer: &T::AccountId,
@@ -415,9 +424,9 @@ impl<T: Trait> Module<T> {
 
 
 	fn native_to_trade_input(
-		exchange: &mut Exchange<T::AssetId, T::Balance, CurrencyOf<T>>,
+		exchange: &mut Exchange<T::AssetId, BalanceOf<T>, CurrencyOf<T>>,
 		native_in: CurrencyOf<T>,
-		min_trade_tokens: T::Balance,
+		min_trade_tokens: BalanceOf<T>,
 		deadline: T::BlockNumber,
 		buyer: &T::AccountId,
 		recipient: &T::AccountId
@@ -431,7 +440,7 @@ impl<T: Trait> Module<T> {
 			native_token_reserve.unique_saturated_into(),
 			trade_token_reserve.unique_saturated_into()
 		);
-		let trade_token_bought = T::Balance::saturated_from(trade_token_bought);
+		let trade_token_bought = <BalanceOf<T>>::saturated_from(trade_token_bought);
 
 		let trade_token_id = exchange.trade_token;
 		Self::native_to_trade_swap(
@@ -445,8 +454,8 @@ impl<T: Trait> Module<T> {
 	}
 
 	fn trade_to_native_input(
-		exchange: &mut Exchange<T::AssetId, T::Balance, CurrencyOf<T>>,
-		trade_in: T::Balance,
+		exchange: &mut Exchange<T::AssetId, BalanceOf<T>, CurrencyOf<T>>,
+		trade_in: BalanceOf<T>,
 		min_native_tokens: CurrencyOf<T>,
 		deadline: T::BlockNumber,
 		buyer: &T::AccountId,
@@ -477,8 +486,8 @@ impl<T: Trait> Module<T> {
 
 	/// evoked by dispatchble functions
 	fn native_to_trade_output(
-		exchange: &mut Exchange<T::AssetId, T::Balance, CurrencyOf<T>>,
-		trade_token_bought: T::Balance,
+		exchange: &mut Exchange<T::AssetId, BalanceOf<T>, CurrencyOf<T>>,
+		trade_token_bought: BalanceOf<T>,
 		deadline: T::BlockNumber,
 		buyer: &T::AccountId,
 		recipient: &T::AccountId
@@ -510,7 +519,7 @@ impl<T: Trait> Module<T> {
 
 	/// evoked by dispatchable functions
 	fn trade_to_native_output(
-		exchange: &mut Exchange<T::AssetId, T::Balance, CurrencyOf<T>>,
+		exchange: &mut Exchange<T::AssetId, BalanceOf<T>, CurrencyOf<T>>,
 		native_token_bought: CurrencyOf<T>,
 		deadline: T::BlockNumber,
 		buyer: &T::AccountId,
@@ -530,7 +539,7 @@ impl<T: Trait> Module<T> {
 			native_reserve.unique_saturated_into()
 		);
 
-		let trade_tokens_sold =T::Balance::saturated_from(trade_tokens_sold);
+		let trade_tokens_sold =<BalanceOf<T>>::saturated_from(trade_tokens_sold);
 
 		Self::trade_to_native_swap(
 			exchange,
@@ -542,7 +551,4 @@ impl<T: Trait> Module<T> {
 		)
 	}
 }
-
-
-
 
